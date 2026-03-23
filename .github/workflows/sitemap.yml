@@ -1,0 +1,50 @@
+name: Update sitemap
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # every Monday 6am UTC
+  workflow_dispatch: # manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  sitemap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate sitemap
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TODAY=$(date -u +"%Y-%m-%d")
+          USERNAME="maxpetrusenko"
+
+          # Fetch all public, non-fork repos with Pages enabled
+          REPOS=$(gh repo list "$USERNAME" --visibility=public --json name,isFork --jq '.[] | select(.isFork == false) | .name' --limit 100)
+
+          cat > sitemap.xml << HEADER
+          <?xml version="1.0" encoding="UTF-8"?>
+          <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://${USERNAME}.github.io/</loc><lastmod>${TODAY}</lastmod></url>
+          HEADER
+
+          for repo in $REPOS; do
+            # Check if repo has Pages enabled
+            if gh api "repos/${USERNAME}/${repo}/pages" --silent 2>/dev/null; then
+              echo "  <url><loc>https://${USERNAME}.github.io/${repo}/</loc><lastmod>${TODAY}</lastmod></url>" >> sitemap.xml
+            fi
+          done
+
+          echo "</urlset>" >> sitemap.xml
+
+          # Clean indentation
+          sed -i 's/^          //' sitemap.xml
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add sitemap.xml
+          git diff --staged --quiet || git commit -m "chore: auto-update sitemap" && git push
